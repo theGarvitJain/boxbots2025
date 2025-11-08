@@ -2,9 +2,11 @@
   ESP8266 Client with State Machine, LED Status, and HC-SR04 Sensor
   
   This version adds an HC-SR04 ultrasonic sensor.
-  It reads the distance and sends it to the server every 1 second
-  *after* it is fully connected to Wi-Fi and the server.
-
+  --- *** MODIFIED BEHAVIOR *** ---
+  It continuously polls the sensor and sends a "Triggered" message
+  to the server if the distance is between 5cm and 50cm.
+  It will not send a trigger message more than once every 0.5 seconds.
+  
   LED STATUS CODES:
   - Fast Flash (100ms): Connecting to Wi-Fi.
   - Slow Blink (1000ms): Wi-Fi connected, but searching for the server.
@@ -29,8 +31,7 @@ const char* password = "12345678";
 const char* multicast_group = "224.1.1.1";
 const int multicast_port = 5007;
 const char* server_message = "ESP8266_SERVER_HERE";
-const int MAX_MSG_LEN = 50; 
-
+const int MAX_MSG_LEN = 50;
 // --- Configuration: Server ---
 String server_ip = ""; // Will be populated by discovery
 const int server_port = 5000; // Flask server port
@@ -43,20 +44,19 @@ const int server_port = 5000; // Flask server port
 #define STATE_CONNECTING_WIFI 0
 #define STATE_FINDING_SERVER 1
 #define STATE_RUNNING 2
-int currentState = STATE_CONNECTING_WIFI; 
-
+int currentState = STATE_CONNECTING_WIFI;
 // --- Non-Blocking Timers ---
 unsigned long lastLedToggleTime = 0; 
-unsigned long lastPostTime = 0;
-// *** CHANGED: Send data every 1 second (1000ms) ***
-unsigned long postInterval = 1000; 
+
+// --- *** NEW: Trigger logic timers *** ---
+unsigned long lastTriggerTime = 0; // Time of the last successful trigger
+const unsigned long triggerInterval = 500; // 0.5 seconds (500ms) debounce time
 
 int currentLedState = LED_OFF_STATE;
-
 // --- Global Objects ---
 WiFiUDP udp;
 char incoming_packet[MAX_MSG_LEN];
-int counter = 0;
+// --- *** REMOVED: counter variable is no longer needed *** ---
 
 // =================================================================
 // SETUP: Runs once at boot.
@@ -80,7 +80,7 @@ void setup() {
   WiFi.begin(ssid, password);
 
   lastLedToggleTime = millis();
-  lastPostTime = millis();
+  // --- *** REMOVED: lastPostTime initialization *** ---
 }
 
 // =================================================================
@@ -107,7 +107,7 @@ void loop() {
 void handleConnectingWifi() {
   // --- LED Logic: Fast Flash (100ms) ---
   if (millis() - lastLedToggleTime > 100) {
-    lastLedToggleTime = millis(); 
+    lastLedToggleTime = millis();
     currentLedState = (currentLedState == LED_ON_STATE) ? LED_OFF_STATE : LED_ON_STATE;
     digitalWrite(LED_BUILTIN, currentLedState);
   }
@@ -136,7 +136,7 @@ void handleConnectingWifi() {
 void handleFindingServer() {
   // --- LED Logic: Slow Blink (1000ms) ---
   if (millis() - lastLedToggleTime > 1000) {
-    lastLedToggleTime = millis(); 
+    lastLedToggleTime = millis();
     currentLedState = (currentLedState == LED_ON_STATE) ? LED_OFF_STATE : LED_ON_STATE;
     digitalWrite(LED_BUILTIN, currentLedState);
   }
@@ -146,8 +146,7 @@ void handleFindingServer() {
   if (packet_size) {
     int len = udp.read(incoming_packet, MAX_MSG_LEN - 1);
     if (len > 0) {
-      incoming_packet[len] = '\0'; 
-      
+      incoming_packet[len] = '\0';
       if (strcmp(incoming_packet, server_message) == 0) {
         server_ip = udp.remoteIP().toString(); 
         Serial.println("====================");
@@ -163,7 +162,9 @@ void handleFindingServer() {
         digitalWrite(LED_BUILTIN, LED_ON_STATE);
         currentLedState = LED_ON_STATE;
         
-        lastPostTime = millis(); 
+        // --- *** NEW: Set lastTriggerTime to "now" to prevent
+        //     an immediate trigger on the first sensor read ***
+        lastTriggerTime = millis(); 
       }
     }
   }
@@ -172,6 +173,7 @@ void handleFindingServer() {
 // =================================================================
 // STATE 3: RUNNING (Main Application)
 // =================================================================
+// --- *** THIS FUNCTION IS HEAVILY MODIFIED *** ---
 void handleRunning() {
   // Keep LED solid ON
   if (currentLedState != LED_ON_STATE) {
@@ -179,12 +181,30 @@ void handleRunning() {
     currentLedState = LED_ON_STATE;
   }
   
-  // --- Non-Blocking Send Timer ---
-  // *** CHANGED: Check if 1 second (postInterval) has passed ***
-  if (millis() - lastPostTime > postInterval) {
-    lastPostTime = millis(); // Reset the 1-second timer
-    sendDataToServer();      // Call the function to read sensor and send data
+  // --- NEW Trigger Logic ---
+  
+  // 1. Continuously poll the sensor
+  float distance = getDistanceCm();
+
+  // 2. Check for trigger condition (between 5cm and 50cm)
+  if (distance >= 5.0 && distance <= 50.0) {
+    
+    // 3. Check for rate limiting (0.5 seconds)
+    unsigned long now = millis();
+    if (now - lastTriggerTime > triggerInterval) {
+      lastTriggerTime = now; // Reset the timer
+      
+      // 4. Send the trigger message to the server
+      Serial.print("--- TRIGGERED! Distance: ");
+      Serial.print(distance);
+      Serial.println(" cm ---");
+      
+      sendTriggerData(distance);
+    }
+    // else: A trigger happened, but we are inside the 500ms
+    //       debounce window, so we do nothing.
   }
+  // else: The distance is not in range, so we do nothing.
 }
 
 // =================================================================
@@ -201,7 +221,6 @@ float getDistanceCm() {
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-
   // 3. Read the ECHO pin. pulseIn() waits for the pin to go HIGH,
   //    measures the duration (in microseconds) it stays HIGH,
   //    and then waits for it to go LOW.
@@ -214,7 +233,6 @@ float getDistanceCm() {
   //    The pulse travels there AND back, so we divide by 2.
   //    Distance = (Duration * Speed of Sound) / 2
   float distance = (duration * 0.0343) / 2.0;
-
   // Handle out-of-range readings
   if (distance <= 0 || distance > 400) {
     return 0.0; // Return 0 for invalid readings
@@ -231,7 +249,6 @@ void startServerDiscovery() {
   Serial.println("Starting server discovery...");
   IPAddress multicast_ip;
   multicast_ip.fromString(multicast_group);
-  
   if (udp.beginMulticast(WiFi.localIP(), multicast_ip, multicast_port)) {
     Serial.print("Waiting for server broadcast on ");
     Serial.print(multicast_group);
@@ -245,24 +262,18 @@ void startServerDiscovery() {
 // =================================================================
 // HELPER FUNCTION: Send Data to Server
 // =================================================================
-void sendDataToServer() {
+void sendTriggerData(float distance) {
   // Check if Wi-Fi is still connected.
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected, attempting to reconnect...");
     currentState = STATE_CONNECTING_WIFI; 
-    server_ip = ""; 
+    server_ip = "";
     digitalWrite(LED_BUILTIN, LED_OFF_STATE);
     currentLedState = LED_OFF_STATE;
     return; 
   }
 
-  // --- *** NEW: Get distance reading *** ---
-  float distance = getDistanceCm();
-  Serial.print("Distance measured: ");
-  Serial.print(distance);
-  Serial.println(" cm");
-
-  // --- If we are here, Wi-Fi is good. Proceed with sending. ---
+  // --- We are here, Wi-Fi is good. Proceed with sending. ---
   WiFiClient client;
   HTTPClient http;
 
@@ -274,15 +285,9 @@ void sendDataToServer() {
 
   if (http.begin(client, serverUrl)) {
     http.addHeader("Content-Type", "application/json");
-
-    // --- *** CHANGED: Add "distance" to the JSON payload *** ---
-    String jsonPayload = "{\"message\":\"Hello from ESP8266\", \"value\":" + String(counter) + 
-                         ", \"chipId\":" + String(ESP.getChipId()) + 
-                         ", \"distance\":" + String(distance, 2) + "}"; // String(distance, 2) = 2 decimal places
-    
+    String jsonPayload = String("{\"message\":\"Triggered\"") + ", \"chipId\":" + String(ESP.getChipId()) + ", \"distance\":" + String(distance, 2) + "}";    
     Serial.print("Sending JSON: ");
     Serial.println(jsonPayload);
-
     int httpResponseCode = http.POST(jsonPayload);
     if (httpResponseCode > 0) {
       String response = http.getString();
@@ -298,5 +303,4 @@ void sendDataToServer() {
     Serial.println("HTTP connection failed!");
   }
   
-  counter++; 
 }
