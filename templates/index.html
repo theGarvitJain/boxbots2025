@@ -1,0 +1,77 @@
+<!-- 
+  templates/index.html
+  This file defines the structure of your webpage. 
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP8266 Status</title>
+    
+    <!-- This line links to your CSS file using Flask's 'url_for' helper -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    
+    <h1>ESP8266 Message Status</h1>
+    
+    <!-- *** NEW HTML ELEMENT ***
+      We add this <p> tag to display the ID of the board
+      that sent the most recent message.
+    -->
+    <p id="last-message-from">Waiting for first message...</p>
+    
+    <div id="status-square"></div>
+
+    <!-- Import the Socket.IO client library -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    
+    <!-- Client-side JavaScript -->
+    <script>
+        // Connect to the Socket.IO server (your app.py)
+        const socket = io();
+        
+        // Get the HTML elements we need to control
+        const square = document.getElementById('status-square');
+        // --- *** NEW LINE *** ---
+        // Get the new <p> tag we just added
+        const statusText = document.getElementById('last-message-from');
+
+        // This function runs when the connection is successful
+        socket.on('connect', () => {
+            console.log('Successfully connected to server WebSocket.');
+        });
+
+        // --- *** MODIFIED SECTION *** ---
+        // Listen for the 'new_message' event from the Python server
+        socket.on('new_message', (data) => {
+            // 'data' is now the full JSON object from the ESP:
+            // { message: "...", value: ..., chipId: ... }
+            
+            console.log('Message received:', data);
+            
+            // 1. Update the status text with the Chip ID
+            //    We use a template literal (backticks ``) to build the string.
+            statusText.textContent = `Last message from: Board ${data.chipId}`;
+
+            // 2. Run the flash-and-fade animation
+            //    This logic is unchanged.
+            square.style.transition = 'none';
+            square.style.backgroundColor = '#00ff00'; // Bright Green
+
+            // After a 100ms flash, fade back to red
+            setTimeout(() => {
+                square.style.transition = 'background-color 3s ease';
+                square.style.backgroundColor = '#8b0000'; // Dark Red
+            }, 100); 
+        });
+        // --- *** END OF MODIFICATION *** ---
+
+        // This function runs if the WebSocket gets disconnected
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server WebSocket.');
+        });
+    </script>
+</body>
+</html>
