@@ -1,49 +1,44 @@
-/* static/style.css
-  This file controls the appearance (colors, layout, animation)
-  of your 'index.html' page.
-*/
+/* static/style.css */
 
-/* Styles for the entire page */
 body {
     display: flex;
-    justify-content: center; /* Center horizontally */
-    align-items: center;     /* Center vertically */
-    height: 100vh;           /* Make the body fill the entire viewport height */
-    margin: 0;               /* Remove default browser margin */
-    background-color: #1a1a1a; /* Dark gray background */
-    font-family: Arial, sans-serif; /* Clean font */
-    color: #eee;             /* Light text color */
-    flex-direction: column;  /* Stack elements vertically */
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background-color: #1a1a1a;
+    font-family: Arial, sans-serif;
+    color: #eee;
+    flex-direction: column;
 }
 
-/* Styles for the main title */
 h1 {
-    font-weight: 300; /* Make the font thinner */
+    font-weight: 300;
 }
 
-/* --- *** NEW CSS RULE *** --- */
-/* Styles for the new status text <p> tag */
 #last-message-from {
-    color: #b0b0b0; /* A lighter gray, but not as bright as white */
-    font-size: 1.1em; /* Slightly larger than default paragraph text */
-    font-weight: 300; /* Thin font */
-    margin-top: 0; /* Remove default top margin */
-    margin-bottom: 20px; /* Add space between it and the square */
+    color: #b0b0b0;
+    font-size: 1.1em;
+    font-weight: 300;
+    margin-top: 0;
+    margin-bottom: 5px;
+}
+
+
+#last-distance {
+    color: #e0e0e0; 
+    font-size: 1.1em; 
+    font-weight: 300;
+    margin-top: 0; 
+    margin-bottom: 25px;
 }
 /* --- *** END OF NEW RULE *** --- */
 
-
-/* Styles for the status square */
 #status-square {
     width: 200px;
     height: 200px;
-    
-    /* This is the 'idle' state color */
-    background-color: #8b0000; /* Dark Red */
-    
-    border-radius: 20px; /* Rounded corners */
-    box-shadow: 0 0 30px rgba(0,0,0,0.5); /* Soft shadow */
-    
-    /* This is the animation for the slow fade to red */
+    background-color: #8b0000;
+    border-radius: 20px;
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
     transition: background-color 3s ease; 
 }

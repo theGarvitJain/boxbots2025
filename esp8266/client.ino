@@ -1,9 +1,9 @@
 /*
-  ESP8266 Client with State Machine and LED Status
+  ESP8266 Client with State Machine, LED Status, and HC-SR04 Sensor
   
-  This version has been significantly refactored to be non-blocking
-  and to provide clear visual feedback for its connection status
-  using the built-in LED.
+  This version adds an HC-SR04 ultrasonic sensor.
+  It reads the distance and sends it to the server every 1 second
+  *after* it is fully connected to Wi-Fi and the server.
 
   LED STATUS CODES:
   - Fast Flash (100ms): Connecting to Wi-Fi.
@@ -15,40 +15,43 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
-#include <WiFiUdp.h>  // For listening to multicast
+#include <WiFiUdp.h> // For listening to multicast
 
 // --- Configuration: Wi-Fi ---
 const char* ssid = "iPhone";
 const char* password = "12345678";
 
+// --- Configuration: HC-SR04 Sensor Pins (Corrected) ---
+#define TRIG_PIN 4  // GPIO 4 (D2 on NodeMCU) - Set as OUTPUT
+#define ECHO_PIN 5  // GPIO 5 (D1 on NodeMCU) - Set as INPUT
+
 // --- Configuration: Auto-Discovery (Must match Python server) ---
 const char* multicast_group = "224.1.1.1";
 const int multicast_port = 5007;
 const char* server_message = "ESP8266_SERVER_HERE";
-const int MAX_MSG_LEN = 50;  // Buffer for the message
+const int MAX_MSG_LEN = 50; 
 
 // --- Configuration: Server ---
-String server_ip = "";         // Will be populated by discovery
-const int server_port = 5000;  // Flask server port
+String server_ip = ""; // Will be populated by discovery
+const int server_port = 5000; // Flask server port
 
 // --- Configuration: LED Control ---
-// We use LED_BUILTIN (usually GPIO 2 on NodeMCU/Wemos).
-// This LED is often "active LOW," meaning LOW turns it ON and HIGH turns it OFF.
 #define LED_ON_STATE LOW
 #define LED_OFF_STATE HIGH
 
 // --- State Machine ---
-// We define "states" to track what the ESP is doing.
 #define STATE_CONNECTING_WIFI 0
 #define STATE_FINDING_SERVER 1
 #define STATE_RUNNING 2
-int currentState = STATE_CONNECTING_WIFI;  // Start in the first state
+int currentState = STATE_CONNECTING_WIFI; 
 
 // --- Non-Blocking Timers ---
-// We use millis() to track time without stopping the code.
-unsigned long lastLedToggleTime = 0;  // For LED blinking
-unsigned long lastPostTime = 0;       // For the 10-second data send
-int currentLedState = LED_OFF_STATE;  // Tracks if LED is on or off
+unsigned long lastLedToggleTime = 0; 
+unsigned long lastPostTime = 0;
+// *** CHANGED: Send data every 1 second (1000ms) ***
+unsigned long postInterval = 1000; 
+
+int currentLedState = LED_OFF_STATE;
 
 // --- Global Objects ---
 WiFiUDP udp;
@@ -60,31 +63,31 @@ int counter = 0;
 // =================================================================
 void setup() {
   Serial.begin(115200);
-  delay(100);  // Wait for Serial to initialize
+  delay(100); 
 
-  // Configure the built-in LED pin as an output
+  // Configure the built-in LED pin
   pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LED_OFF_STATE);  // Start with LED off
+  digitalWrite(LED_BUILTIN, LED_OFF_STATE);
   currentLedState = LED_OFF_STATE;
 
+  // --- *** NEW: Configure Sensor Pins *** ---
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  
   Serial.println();
   Serial.println("Booting... Attempting to connect to Wi-Fi.");
-
-  // Start the Wi-Fi connection. We will NOT wait here.
-  // The loop() will handle checking the connection status.
+  
   WiFi.begin(ssid, password);
 
-  // Initialize our timers
   lastLedToggleTime = millis();
   lastPostTime = millis();
 }
 
 // =================================================================
-// LOOP: Runs continuously and as fast as possible.
+// LOOP: Runs continuously.
 // =================================================================
 void loop() {
   // This "switch" statement is the core of our state machine.
-  // It runs the code for the *current* state.
   switch (currentState) {
     case STATE_CONNECTING_WIFI:
       handleConnectingWifi();
@@ -102,21 +105,15 @@ void loop() {
 // STATE 1: CONNECTING TO WI-FI
 // =================================================================
 void handleConnectingWifi() {
-  // This function is called over and over by loop()
-  // while we are in STATE_CONNECTING_WIFI.
-
   // --- LED Logic: Fast Flash (100ms) ---
   if (millis() - lastLedToggleTime > 100) {
-    lastLedToggleTime = millis();  // Reset the timer
-    // Flip the LED state
+    lastLedToggleTime = millis(); 
     currentLedState = (currentLedState == LED_ON_STATE) ? LED_OFF_STATE : LED_ON_STATE;
     digitalWrite(LED_BUILTIN, currentLedState);
   }
 
   // --- State Change Logic ---
-  // Check if Wi-Fi has finally connected
   if (WiFi.status() == WL_CONNECTED) {
-    // --- Connection Successful ---
     Serial.println();
     Serial.println("====================");
     Serial.println("  WiFi Connected!");
@@ -124,13 +121,11 @@ void handleConnectingWifi() {
     Serial.println(WiFi.localIP());
     Serial.println("====================");
 
-    // Now, start the server discovery
     startServerDiscovery();
-
-    // And move to the next state
+    
     currentState = STATE_FINDING_SERVER;
-    lastLedToggleTime = millis();              // Reset timer for the new state's blink rate
-    digitalWrite(LED_BUILTIN, LED_OFF_STATE);  // Start with LED off
+    lastLedToggleTime = millis(); 
+    digitalWrite(LED_BUILTIN, LED_OFF_STATE);
     currentLedState = LED_OFF_STATE;
   }
 }
@@ -139,51 +134,36 @@ void handleConnectingWifi() {
 // STATE 2: FINDING THE SERVER
 // =================================================================
 void handleFindingServer() {
-  // This function is called by loop() while we are in
-  // STATE_FINDING_SERVER.
-
   // --- LED Logic: Slow Blink (1000ms) ---
   if (millis() - lastLedToggleTime > 1000) {
-    lastLedToggleTime = millis();  // Reset the timer
-    // Flip the LED state
+    lastLedToggleTime = millis(); 
     currentLedState = (currentLedState == LED_ON_STATE) ? LED_OFF_STATE : LED_ON_STATE;
     digitalWrite(LED_BUILTIN, currentLedState);
   }
 
   // --- State Change Logic ---
-  // Check if a UDP packet has arrived
   int packet_size = udp.parsePacket();
   if (packet_size) {
-    // Read the packet
     int len = udp.read(incoming_packet, MAX_MSG_LEN - 1);
     if (len > 0) {
-      incoming_packet[len] = '\0';  // Null-terminate the string
-
-      Serial.print("Received packet: '");
-      Serial.print(incoming_packet);
-      Serial.print("' from ");
-      Serial.println(udp.remoteIP());
-
-      // Check if this is the server message we expect
+      incoming_packet[len] = '\0'; 
+      
       if (strcmp(incoming_packet, server_message) == 0) {
-        // --- Server Found! ---
-        server_ip = udp.remoteIP().toString();  // Save the server's IP
+        server_ip = udp.remoteIP().toString(); 
         Serial.println("====================");
         Serial.println("  Server Found!");
         Serial.print("  Server IP set to: ");
         Serial.println(server_ip);
         Serial.println("====================");
-
-        udp.stop();  // Stop listening
-
-        // Move to the final "running" state
+        
+        udp.stop(); 
+        
         currentState = STATE_RUNNING;
-
-        // --- LED Logic: Solid ON ---
+        
         digitalWrite(LED_BUILTIN, LED_ON_STATE);
         currentLedState = LED_ON_STATE;
-
-        lastPostTime = millis();  // Reset post timer so it sends first message
+        
+        lastPostTime = millis(); 
       }
     }
   }
@@ -193,33 +173,65 @@ void handleFindingServer() {
 // STATE 3: RUNNING (Main Application)
 // =================================================================
 void handleRunning() {
-  // This is the main state. The LED should be solid ON.
-  // We just ensure it's on, in case something else toggled it.
+  // Keep LED solid ON
   if (currentLedState != LED_ON_STATE) {
     digitalWrite(LED_BUILTIN, LED_ON_STATE);
     currentLedState = LED_ON_STATE;
   }
-
+  
   // --- Non-Blocking Send Timer ---
-  // Check if 10 seconds have passed since the last send
-  if (millis() - lastPostTime > 10000) {
-    lastPostTime = millis();  // Reset the 10-second timer
-    sendDataToServer();       // Call the function to send data
+  // *** CHANGED: Check if 1 second (postInterval) has passed ***
+  if (millis() - lastPostTime > postInterval) {
+    lastPostTime = millis(); // Reset the 1-second timer
+    sendDataToServer();      // Call the function to read sensor and send data
   }
 }
+
+// =================================================================
+// HELPER FUNCTION: Get Distance
+// =================================================================
+float getDistanceCm() {
+  // --- This is the standard HC-SR04 pulse sequence ---
+
+  // 1. Clear the TRIG pin (ensure it's low)
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  // 2. Send a 10-microsecond pulse to trigger the sensor
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // 3. Read the ECHO pin. pulseIn() waits for the pin to go HIGH,
+  //    measures the duration (in microseconds) it stays HIGH,
+  //    and then waits for it to go LOW.
+  //    A 30000 µs timeout (~5 meters) prevents it from
+  //    getting stuck forever if no echo is received.
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  // 4. Calculate the distance
+  //    Speed of sound is approx. 343 m/s, or 0.0343 cm/µs.
+  //    The pulse travels there AND back, so we divide by 2.
+  //    Distance = (Duration * Speed of Sound) / 2
+  float distance = (duration * 0.0343) / 2.0;
+
+  // Handle out-of-range readings
+  if (distance <= 0 || distance > 400) {
+    return 0.0; // Return 0 for invalid readings
+  }
+
+  return distance;
+}
+
 
 // =================================================================
 // HELPER FUNCTION: Start Server Discovery
 // =================================================================
 void startServerDiscovery() {
   Serial.println("Starting server discovery...");
-
-  // We must first convert the char* string "224.1.1.1"
-  // into an IPAddress object.
   IPAddress multicast_ip;
   multicast_ip.fromString(multicast_group);
-
-  // Begin listening to the multicast group
+  
   if (udp.beginMulticast(WiFi.localIP(), multicast_ip, multicast_port)) {
     Serial.print("Waiting for server broadcast on ");
     Serial.print(multicast_group);
@@ -227,7 +239,6 @@ void startServerDiscovery() {
     Serial.println(multicast_port);
   } else {
     Serial.println("Failed to start multicast listener!");
-    // You could add logic here to reboot or retry
   }
 }
 
@@ -236,45 +247,43 @@ void startServerDiscovery() {
 // =================================================================
 void sendDataToServer() {
   // Check if Wi-Fi is still connected.
-  // If not, reset the whole state machine.
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected, attempting to reconnect...");
-    currentState = STATE_CONNECTING_WIFI;      // Go back to state 1
-    server_ip = "";                            // We lost the server, so we must find it again
-    digitalWrite(LED_BUILTIN, LED_OFF_STATE);  // Turn off LED
+    currentState = STATE_CONNECTING_WIFI; 
+    server_ip = ""; 
+    digitalWrite(LED_BUILTIN, LED_OFF_STATE);
     currentLedState = LED_OFF_STATE;
-    return;  // Exit this function
+    return; 
   }
+
+  // --- *** NEW: Get distance reading *** ---
+  float distance = getDistanceCm();
+  Serial.print("Distance measured: ");
+  Serial.print(distance);
+  Serial.println(" cm");
 
   // --- If we are here, Wi-Fi is good. Proceed with sending. ---
   WiFiClient client;
   HTTPClient http;
 
-  // Construct the server URL (using the auto-discovered IP)
   String serverUrl = "http://";
   serverUrl += server_ip;
   serverUrl += ":";
   serverUrl += server_port;
-  serverUrl += "/data";  // The endpoint
+  serverUrl += "/data";
 
-  Serial.print("Connecting to server: ");
-  Serial.println(serverUrl);
-
-  // Start the HTTP request
   if (http.begin(client, serverUrl)) {
-
     http.addHeader("Content-Type", "application/json");
 
-    // We now add a "chipId" field to the JSON payload.
-    // ESP.getChipId() returns a unique 32-bit integer for this board.
-    String jsonPayload = "{\"message\":\"Hello from ESP8266\", \"value\":" + String(counter) + ", \"chipId\":" + String(ESP.getChipId()) + "}";
-
+    // --- *** CHANGED: Add "distance" to the JSON payload *** ---
+    String jsonPayload = "{\"message\":\"Hello from ESP8266\", \"value\":" + String(counter) + 
+                         ", \"chipId\":" + String(ESP.getChipId()) + 
+                         ", \"distance\":" + String(distance, 2) + "}"; // String(distance, 2) = 2 decimal places
+    
     Serial.print("Sending JSON: ");
     Serial.println(jsonPayload);
 
-    // Send the POST request
     int httpResponseCode = http.POST(jsonPayload);
-
     if (httpResponseCode > 0) {
       String response = http.getString();
       Serial.print("HTTP Response Code: ");
@@ -284,11 +293,10 @@ void sendDataToServer() {
     } else {
       Serial.printf("HTTP Error! Code: %d\n", httpResponseCode);
     }
-
-    http.end();  // Free resources
+    http.end(); 
   } else {
     Serial.println("HTTP connection failed!");
   }
-
-  counter++;  // Increment the message counter
+  
+  counter++; 
 }
