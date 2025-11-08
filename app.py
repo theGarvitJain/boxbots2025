@@ -75,7 +75,7 @@ def receive_data():
         print("=========================")
         print(f"[DATA RECEIVED from Board: {chip_id}]")
         print(f"  Message: {data.get('message')}")
-        print(f"  Value:   {data.get('value')}")
+        print(f" Distance: {data.get('distance')} cm")
         print("=========================")
         
         # --- This is the REAL-TIME part ---

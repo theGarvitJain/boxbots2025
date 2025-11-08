@@ -25,14 +25,12 @@
         // Get the HTML elements we need to control
         const square = document.getElementById('status-square');
         const statusText = document.getElementById('last-message-from');
-        // --- *** NEW LINE *** ---
         const distanceText = document.getElementById('last-distance');
 
         socket.on('connect', () => {
             console.log('Successfully connected to server WebSocket.');
         });
 
-        // --- *** MODIFIED SECTION *** ---
         // Listen for the 'new_message' event
         socket.on('new_message', (data) => {
             // 'data' is the full JSON object:
@@ -60,7 +58,6 @@
                 square.style.backgroundColor = '#8b0000'; // Dark Red
             }, 100); 
         });
-        // --- *** END OF MODIFICATION *** ---
 
         socket.on('disconnect', () => {
             console.log('Disconnected from server WebSocket.');

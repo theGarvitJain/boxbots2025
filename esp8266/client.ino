@@ -23,11 +23,11 @@
 const char* ssid = "iPhone";
 const char* password = "12345678";
 
-// --- Configuration: HC-SR04 Sensor Pins (Corrected) ---
+// --- Configuration: HC-SR04 Sensor Pins ---
 #define TRIG_PIN 4  // GPIO 4 (D2 on NodeMCU) - Set as OUTPUT
 #define ECHO_PIN 5  // GPIO 5 (D1 on NodeMCU) - Set as INPUT
 
-// --- Configuration: Auto-Discovery (Must match Python server) ---
+// --- Configuration: Auto-Discovery (Matching Python server) ---
 const char* multicast_group = "224.1.1.1";
 const int multicast_port = 5007;
 const char* server_message = "ESP8266_SERVER_HERE";
@@ -173,7 +173,6 @@ void handleFindingServer() {
 // =================================================================
 // STATE 3: RUNNING (Main Application)
 // =================================================================
-// --- *** THIS FUNCTION IS HEAVILY MODIFIED *** ---
 void handleRunning() {
   // Keep LED solid ON
   if (currentLedState != LED_ON_STATE) {
@@ -181,7 +180,6 @@ void handleRunning() {
     currentLedState = LED_ON_STATE;
   }
   
-  // --- NEW Trigger Logic ---
   
   // 1. Continuously poll the sensor
   float distance = getDistanceCm();
@@ -285,10 +283,12 @@ void sendTriggerData(float distance) {
 
   if (http.begin(client, serverUrl)) {
     http.addHeader("Content-Type", "application/json");
-    String jsonPayload = String("{\"message\":\"Triggered\"") + ", \"chipId\":" + String(ESP.getChipId()) + ", \"distance\":" + String(distance, 2) + "}";    
+    String jsonPayload = String("{\"message\":\"Triggered\"") + ", \"chipId\":" + String(ESP.getChipId()) + ", \"distance\":" + String(distance, 2) + "}";     
     Serial.print("Sending JSON: ");
     Serial.println(jsonPayload);
+    
     int httpResponseCode = http.POST(jsonPayload);
+    
     if (httpResponseCode > 0) {
       String response = http.getString();
       Serial.print("HTTP Response Code: ");
@@ -296,11 +296,24 @@ void sendTriggerData(float distance) {
       Serial.print("Server Response: ");
       Serial.println(response);
     } else {
-      Serial.printf("HTTP Error! Code: %d\n", httpResponseCode);
+      Serial.printf("HTTP Error! Code: %d. Server lost.\n", httpResponseCode);
+      
+      // Server is gone, go back to finding it
+      server_ip = ""; // Forget the bad IP
+      startServerDiscovery(); // Re-start the UDP listener
+      currentState = STATE_FINDING_SERVER; // Go back to "finding" state
+      digitalWrite(LED_BUILTIN, LED_OFF_STATE); // Turn off the solid light
+      currentLedState = LED_OFF_STATE;
     }
     http.end(); 
   } else {
-    Serial.println("HTTP connection failed!");
+    Serial.println("HTTP connection failed! Server lost.");
+    
+    // --- Server is gone, go back to finding it ---
+    server_ip = ""; // Forget the bad IP
+    startServerDiscovery(); // Re-start the UDP listener
+    currentState = STATE_FINDING_SERVER; // Go back to "finding" state
+    digitalWrite(LED_BUILTIN, LED_OFF_STATE); // Turn off the solid light
+    currentLedState = LED_OFF_STATE;
   }
-  
 }
