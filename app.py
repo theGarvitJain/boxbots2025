@@ -246,7 +246,7 @@ def show_sequence_to_client():
         'status': 'SHOWING', 
         'level': game_instance.get_current_level()
     })
-    time.sleep(1.5) # Wait for 1.5s so user can read the "Level X" message
+    socketio.sleep(1.5) # Wait for 1.5s so user can read the "Level X" message
     
     # Get the sequence of chipIds from the game instance
     sequence_to_show = game_instance.sequence
@@ -260,13 +260,13 @@ def show_sequence_to_client():
             
             # Wait 1 second before showing the next flash
             # (This timing can be adjusted)
-            time.sleep(1.0) 
+            socketio.sleep(1.0) 
             
     # The sequence is finished. Tell the game logic to start the player's turn.
     game_instance.start_player_turn()
     
     # Tell the browser the player's turn has begun
-    socketio.emit('game_update', {'status': 'PLAYER_TURN'})
+    socketio.emit('game_update', {'status': 'PLAYER_TURN','level': game_instance.get_current_level()})
     print("[Game] Player turn has started.")
 
 def _handle_next_level():
@@ -280,7 +280,7 @@ def _handle_next_level():
         'status': 'LEVEL_COMPLETE',
         'level': game_instance.get_current_level()
     })
-    time.sleep(2.5) # Pause so the player can celebrate
+    socketio.sleep(2.5) # Pause so the player can celebrate
     
     # Tell the game instance to advance to the next level
     game_instance.next_level()
