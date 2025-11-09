@@ -14,31 +14,73 @@ body {
 
 h1 {
     font-weight: 300;
-}
-
-#last-message-from {
-    color: #b0b0b0;
-    font-size: 1.1em;
-    font-weight: 300;
-    margin-top: 0;
     margin-bottom: 5px;
 }
 
-
-#last-distance {
-    color: #b0b0b0; 
-    font-size: 1.1em; 
+h2 {
     font-weight: 300;
-    margin-top: 0; 
-    margin-bottom: 25px;
+    color: #b0b0b0;
+    min-height: 1.2em; /* Prevents layout shift when text changes */
+    margin-top: 0;
 }
-/* --- *** END OF NEW RULE *** --- */
 
-#status-square {
-    width: 200px;
-    height: 200px;
+button {
+    padding: 10px 20px;
+    font-size: 1.1em;
+    font-weight: 300;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    margin-bottom: 30px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+}
+
+/* This new container will hold the squares in a row */
+#game-container {
+    display: flex;
+    flex-wrap: wrap; /* Allows squares to wrap on small screens */
+    justify-content: center;
+    gap: 20px; /* Adds space between the squares */
+}
+
+/* This is the new base class for all game squares */
+.status-square {
+    width: 150px;
+    height: 150px;
+    
+    /* Default resting color (will be overridden) */
     background-color: #8b0000;
+    
     border-radius: 20px;
     box-shadow: 0 0 30px rgba(0,0,0,0.5);
-    transition: background-color 3s ease; 
+    
+    /* The transition is now set by JavaScript,
+       but we can keep a default one */
+    transition: background-color 3s ease;
+    
+    /* Center the color label */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.7);
 }
+
+/* We no longer need specific color classes here, 
+   as the JavaScript sets the 'background-color'
+   and 'data-resting-color' directly.
+   The .status-square rule provides all the
+   sizing, shadow, and font styling needed.
+*/

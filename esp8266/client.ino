@@ -24,8 +24,8 @@ const char* ssid = "iPhone";
 const char* password = "12345678";
 
 // --- Configuration: HC-SR04 Sensor Pins ---
-#define TRIG_PIN 4  // GPIO 4 (D2 on NodeMCU) - Set as OUTPUT
-#define ECHO_PIN 5  // GPIO 5 (D1 on NodeMCU) - Set as INPUT
+#define TRIG_PIN 4  // GPIO 4 (D2 on NodeMCU) - Set as OUTPUT (Green)
+#define ECHO_PIN 5  // GPIO 5 (D1 on NodeMCU) - Set as INPUT (Blue)
 
 // --- Configuration: Auto-Discovery (Matching Python server) ---
 const char* multicast_group = "224.1.1.1";

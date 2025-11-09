@@ -3,65 +3,197 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP8266 Status</title>
+    <title>ESP8266 Simon Says</title>
     
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     
-    <h1>ESP8266 Sensor Status</h1>
+    <h1>ESP8266 Simon Says</h1>
     
-    <p id="last-message-from">Waiting for first message...</p>
+    <!-- This element will show game status like "Level 5" or "Game Over" -->
+    <h2 id="game-status">Press Start to begin!</h2>
     
-    <p id="last-distance">Distance: --</p>
+    <!-- This button will be used to start the game -->
+    <button id="start-button">Start Game</button>
     
-    <div id="status-square"></div>
+    <!-- This container will hold all the game squares (one per ESP) -->
+    <div id="game-container">
+        <!-- Squares will be dynamically added here by JavaScript -->
+    </div>
 
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- Load the SocketIO library -->
+    <script src="https://cdn/socket.io/4.7.5/socket.io.min.js"></script>
     
     <script>
+        // --- Establish Connection ---
         const socket = io();
         
-        // Get the HTML elements we need to control
-        const square = document.getElementById('status-square');
-        const statusText = document.getElementById('last-message-from');
-        const distanceText = document.getElementById('last-distance');
+        // --- Get Control Elements ---
+        const gameContainer = document.getElementById('game-container');
+        const statusText = document.getElementById('game-status');
+        const startButton = document.getElementById('start-button');
+
+        // --- Color Mapping (Issue 3 Fix) ---
+        // Maps the color names from the server to their resting (dim)
+        // and vibrant (flash) CSS hex codes
+        const colorMap = {
+            'red': { resting: '#8b0000', vibrant: '#ff0000' },
+            'green': { resting: '#006400', vibrant: '#00ff00' },
+            'yellow': { resting: '#8B8000', vibrant: '#ffff00' },
+            'blue': { resting: '#00008b', vibrant: '#0000ff' }
+        };
+        const defaultColor = { resting: '#444', vibrant: '#eee' };
+
+
+        // --- SocketIO Listeners ---
 
         socket.on('connect', () => {
             console.log('Successfully connected to server WebSocket.');
         });
 
-        // Listen for the 'new_message' event
-        socket.on('new_message', (data) => {
-            // 'data' is the full JSON object:
-            // { ..., chipId: ..., distance: ... }
-            
-            console.log('Message received:', data);
-            
-            // 1. Update the status text with the Chip ID
-            statusText.textContent = `Last message from: Board ${data.chipId}`;
-
-            // 2. Update the distance text
-            //    We check if the distance is a valid reading (not 0)
-            if (data.distance > 0) {
-                distanceText.textContent = `Distance: ${data.distance} cm`;
-            } else {
-                distanceText.textContent = "Distance: Out of range";
-            }
-
-            // 3. Run the flash-and-fade animation
-            square.style.transition = 'none';
-            square.style.backgroundColor = '#00ff00'; // Bright Green
-
-            setTimeout(() => {
-                square.style.transition = 'background-color 3s ease';
-                square.style.backgroundColor = '#8b0000'; // Dark Red
-            }, 100); 
-        });
-
         socket.on('disconnect', () => {
             console.log('Disconnected from server WebSocket.');
         });
+        
+        // This is the trigger flash when an ESP is *actually* hit
+        socket.on('new_message', (data) => {
+            // 'data' is the full JSON object: { ..., chipId: ..., distance: ... }
+            console.log('Trigger message received:', data);
+            
+            // We only flash the square if it exists on the page
+            if (data.chipId) {
+                // We pass 'false' to indicate this is a player hit,
+                // not a server demo flash (though they look the same)
+                flashSquare(data.chipId);
+            }
+        });
+        
+        // --- THIS LISTENER FIXES ISSUE 2 ---
+        // This is the "demo" flash when the server shows the sequence
+        socket.on('show_flash', (data) => {
+            // 'data' is { chipId: ... }
+            console.log('Show flash command received:', data);
+            if (data.chipId) {
+                flashSquare(data.chipId);
+            }
+        });
+
+        // This listener builds the game board
+        socket.on('update_boards', (boards) => {
+            // 'boards' is an object like: { "9072791": "green", ... }
+            console.log('Updating boards:', boards);
+            
+            // Clear any old squares
+            gameContainer.innerHTML = '';
+            
+            // Create a new square for each board
+            for (const chipId in boards) {
+                const colorName = boards[chipId]; // e.g., 'green'
+                const colors = colorMap[colorName] || defaultColor; // Get color pair
+                
+                const square = document.createElement('div');
+                
+                // Set the ID to the chipId so we can find it later
+                square.id = chipId;
+                
+                // Add the base CSS class
+                square.className = 'status-square';
+                
+                // Set its resting color
+                square.style.backgroundColor = colors.resting;
+                
+                // Store the color info on the element for the flash logic
+                square.dataset.restingColor = colors.resting;
+                square.dataset.vibrantColor = colors.vibrant;
+                
+                // Add a label (optional)
+                const label = document.createElement('span');
+                label.textContent = colorName.charAt(0).toUpperCase() + colorName.slice(1);
+                square.appendChild(label);
+                
+                // Add the new square to the page
+                gameContainer.appendChild(square);
+            }
+        });
+
+        // This listener handles all game state messages
+        socket.on('game_update', (data) => {
+            // 'data' is { status: '...', level: '...', reason: '...', message: '...' }
+            console.log('Game update:', data);
+
+            switch(data.status) {
+                case 'SHOWING':
+                    statusText.textContent = `Level ${data.level}! Watch...`;
+                    startButton.disabled = true;
+                    break;
+                case 'PLAYER_TURN':
+                    statusText.textContent = `Level ${data.level}: Your Turn!`;
+                    startButton.disabled = true;
+                    break;
+                case 'LEVEL_COMPLETE':
+                    statusText.textContent = `Level ${data.level} Complete!`;
+                    startButton.disabled = true;
+                    break;
+                case 'GAME_OVER':
+                    let reason = (data.reason === 'timeout') ? 'You ran out of time!' : 'Wrong move!';
+                    statusText.textContent = `Game Over! (Level ${data.level}) ${reason}`;
+                    startButton.disabled = false;
+                    startButton.textContent = 'Play Again?';
+                    break;
+                case 'CORRECT_INPUT':
+                    // This is optional, we could play a sound here
+                    console.log('Correct input, waiting for next...');
+                    break;
+                case 'ERROR':
+                    // e.g., "No boards connected"
+                    statusText.textContent = data.message;
+                    startButton.disabled = false;
+                    break;
+            }
+        });
+        
+        // --- Click Handlers ---
+        
+        startButton.addEventListener('click', () => {
+            console.log('Start button clicked.');
+            socket.emit('start_game');
+            statusText.textContent = 'Get Ready...';
+            startButton.disabled = true;
+        });
+        
+        // --- Helper Functions ---
+        
+        /**
+         * Finds a square by its chipId and runs the flash-and-fade animation.
+         * THIS FUNCTION FIXES ISSUE 3
+         */
+        function flashSquare(chipId) {
+            const square = document.getElementById(chipId);
+            
+            // Do nothing if the square doesn't exist
+            if (!square) {
+                console.warn(`Tried to flash non-existent square: ${chipId}`);
+                return;
+            }
+            
+            // Get the square's unique colors, which we stored earlier
+            const restingColor = square.dataset.restingColor;
+            const vibrantColor = square.dataset.vibrantColor;
+
+            // 1. Remove any transition, go to VIBRANT color immediately
+            square.style.transition = 'none';
+            square.style.backgroundColor = vibrantColor;
+
+            // 2. Wait a tiny moment, then re-apply the transition
+            //    and set the *target* color to fade back to.
+            setTimeout(() => {
+                // This is a shorter, 1-second fade
+                square.style.transition = 'background-color 1s ease';
+                square.style.backgroundColor = restingColor;
+            }, 100); 
+        }
+
     </script>
 </body>
 </html>
