@@ -32,8 +32,10 @@ app = Flask(__name__)
 # By default, Flask looks for 'templates' and 'static' folders in the same directory.
 
 # Initialize SocketIO for real-time communication
-# 'eventlet' is a high-performance server needed for SocketIO
-socketio = SocketIO(app, async_mode='eventlet')
+# We remove 'async_mode="eventlet"' to let flask-socketio
+# automatically pick the best available async technology.
+# This is far more robust and avoids dependency issues.
+socketio = SocketIO(app)
 
 # --- Game & Board Management ---
 
@@ -115,6 +117,7 @@ def receive_data():
                 game_instance.set_available_boards(connected_boards.keys())
                 
                 # Send the complete, updated list to ALL web browsers
+                # This is the command that makes the boards appear.
                 socketio.emit('update_boards', connected_boards)
         elif chip_id != 'Unknown':
             # This is an unknown board, we ignore it
@@ -128,39 +131,43 @@ def receive_data():
              return jsonify({"status": "success", "message": "Ignored unknown board"}), 200
 
         # Print the data to your Python server console (optional)
+        # This will show all messages, including the 0.0 registration
         print(f"[Data from {chip_id}] Dist: {data.get('distance')} cm")
         
         # --- 2. This is the REAL-TIME flash part ---
-        # Send a message (we'll call it 'new_message') to ALL connected
-        # web browsers. The front-end uses this to trigger the green flash
-        # animation *every* time a board is hit.
-        socketio.emit('new_message', data)
+        # We only want to flash if the distance is *not* 0
+        # (0.0 is our special registration packet)
+        if data.get('distance', 0.0) > 0.0:
+            # Send a message (we'll call it 'new_message') to ALL connected
+            # web browsers. The front-end uses this to trigger the green flash
+            # animation *every* time a board is hit.
+            socketio.emit('new_message', data)
         
-        # --- 3. Game Logic Integration ---
-        # Check if the game is currently waiting for player input
-        if game_instance.state == 'PLAYER_TURN':
-            # Pass the chipId to the game logic and get the result
-            result = game_instance.check_player_input(chip_id)
-            
-            # Act based on the result from the game logic
-            if result == 'WRONG':
-                # Player made a mistake
-                socketio.emit('game_update', {
-                    'status': 'GAME_OVER',
-                    'level': game_instance.get_current_level(),
-                    'reason': 'wrong_input'
-                })
-            
-            elif result == 'LEVEL_COMPLETE':
-                # Player finished the sequence correctly
-                # We start a background task to avoid blocking the server
-                # This task will pause, then start the next level
-                socketio.start_background_task(target=_handle_next_level)
+            # --- 3. Game Logic Integration ---
+            # Check if the game is currently waiting for player input
+            if game_instance.state == 'PLAYER_TURN':
+                # Pass the chipId to the game logic and get the result
+                result = game_instance.check_player_input(chip_id)
                 
-            elif result == 'CORRECT':
-                # Player input was correct, but the sequence isn't finished
-                # We can send a small update, e.g., to play a sound
-                socketio.emit('game_update', {'status': 'CORRECT_INPUT'})
+                # Act based on the result from the game logic
+                if result == 'WRONG':
+                    # Player made a mistake
+                    socketio.emit('game_update', {
+                        'status': 'GAME_OVER',
+                        'level': game_instance.get_current_level(),
+                        'reason': 'wrong_input'
+                    })
+                
+                elif result == 'LEVEL_COMPLETE':
+                    # Player finished the sequence correctly
+                    # We start a background task to avoid blocking the server
+                    # This task will pause, then start the next level
+                    socketio.start_background_task(target=_handle_next_level)
+                    
+                elif result == 'CORRECT':
+                    # Player input was correct, but the sequence isn't finished
+                    # We can send a small update, e.g., to play a sound
+                    socketio.emit('game_update', {'status': 'CORRECT_INPUT'})
         
         # Send a "200 OK" success response back to the ESP8266
         return jsonify({"status": "success", "received_data": data}), 200
@@ -191,7 +198,8 @@ def handle_connect():
     """
     print(f"New web client connected. Sending current board list.")
     # 'emit' (without 'socketio.' prefix) sends only to the client
-    # that just connected.
+    # that just connected. This updates the UI for a user who
+    # connects *after* the boards are already registered.
     emit('update_boards', connected_boards)
 
 @socketio.on('start_game')
@@ -200,16 +208,29 @@ def handle_start_game():
     This runs when the user clicks the "Start Game" button on the webpage.
     """
     if game_instance.state == 'PLAYER_TURN':
+        # Prevent starting a new game while one is active
         print("[Game] Ignoring 'start_game' request, game already in progress.")
         return
 
     print("[Game] 'start_game' event received. Starting new game...")
-    # Reset the game logic to level 1
-    game_instance.start_new_game()
     
-    # Start a background task to show the sequence, so the server
-    # doesn't get blocked by the 'time.sleep' calls.
-    socketio.start_background_task(target=show_sequence_to_client)
+    # Call start_new_game() and store its return value (True/False)
+    game_started = game_instance.start_new_game()
+    
+    # Check if the game successfully started
+    if game_started:
+        # Game started (boards were connected), so show the sequence
+        # Start a background task to show the sequence, so the server
+        # doesn't get blocked by the 'time.sleep' calls.
+        socketio.start_background_task(target=show_sequence_to_client)
+    else:
+        # Game failed to start (no boards available)
+        # Send an error message back to the client
+        print("[Game] 'start_game' failed: No boards available.")
+        socketio.emit('game_update', {
+            'status': 'ERROR',
+            'message': 'No boards connected! Cannot start game.'
+        })
 
 # --- Game Helper Functions (Run by Server) ---
 
@@ -220,6 +241,7 @@ def show_sequence_to_client():
     """
     # Give a brief pause before starting the sequence
     print("[Game] Showing sequence...")
+    # Tell the browser to show the "Level X! Watch..." message
     socketio.emit('game_update', {
         'status': 'SHOWING', 
         'level': game_instance.get_current_level()
@@ -229,6 +251,7 @@ def show_sequence_to_client():
     # Get the sequence of chipIds from the game instance
     sequence_to_show = game_instance.sequence
     
+    # Loop through each chipId in the correct sequence
     for chip_id in sequence_to_show:
         # Check if the board is still connected (it might have disconnected)
         if chip_id in connected_boards:
@@ -236,7 +259,7 @@ def show_sequence_to_client():
             socketio.emit('show_flash', {'chipId': chip_id})
             
             # Wait 1 second before showing the next flash
-            # (0.7s for the flash, 0.3s pause)
+            # (This timing can be adjusted)
             time.sleep(1.0) 
             
     # The sequence is finished. Tell the game logic to start the player's turn.
@@ -267,13 +290,14 @@ def _handle_next_level():
 
 def on_player_timeout_callback():
     """
-This function is passed to the Game instance when it's created.
+    This function is passed to the Game instance when it's created.
     The Game instance's internal timer will call this from a separate
     thread if the player runs out of time.
     """
     print("[Game] Player timed out (callback triggered).")
     
-    # We must emit from within the socketio context
+    # We must emit from within the socketio context.
+    # The correct function is 'app.app_context()', not 'app.app_config()'.
     with app.app_context():
         # Tell all browsers that the game is over due to a timeout
         socketio.emit('game_update', {
@@ -300,5 +324,7 @@ if __name__ == '__main__':
     #    (which is what the ESP needs to find it).
     print("Starting Flask-SocketIO server on 0.0.0.0:5000...")
     # We use 'socketio.run' here instead of 'app.run' to ensure
-    # both Flask and SocketIO work correctly together with 'eventlet'.
+    # both Flask and SocketIO work correctly together.
+    # This will automatically use 'eventlet' or 'gevent' if installed,
+    # or fall back to the Werkzeug server.
     socketio.run(app, host='0.0.0.0', port=5000)
