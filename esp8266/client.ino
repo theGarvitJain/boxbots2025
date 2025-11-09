@@ -50,7 +50,7 @@ unsigned long lastLedToggleTime = 0;
 
 // --- Trigger logic timers ---
 unsigned long lastTriggerTime = 0; // Time of the last successful trigger
-const unsigned long triggerInterval = 500; // 0.5 seconds (500ms) debounce time
+const unsigned long triggerInterval = 1500; // 1.5 second debounce time
 
 // --- Global Objects ---
 WiFiUDP udp; // UDP object for multicast listening
@@ -215,7 +215,7 @@ void handleRunning() {
   // 2. Check for trigger condition (between 5cm and 50cm)
   if (distance >= 5.0 && distance <= 50.0) {
     
-    // 3. Check for rate limiting (0.5 seconds)
+    // 3. Check for rate limiting (1.5 second)
     unsigned long now = millis();
     if (now - lastTriggerTime > triggerInterval) {
       lastTriggerTime = now; // Reset the timer
