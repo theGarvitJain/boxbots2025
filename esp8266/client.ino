@@ -212,8 +212,8 @@ void handleRunning() {
   // 1. Continuously poll the sensor
   float distance = getDistanceCm();
   
-  // 2. Check for trigger condition (between 5cm and 50cm)
-  if (distance >= 5.0 && distance <= 50.0) {
+  // 2. Check for trigger condition (between 5cm and 150cm)
+  if (distance >= 5.0 && distance <= 150.0) {
     
     // 3. Check for rate limiting (1.5 second)
     unsigned long now = millis();
