@@ -7,6 +7,10 @@ lighting up stations in a web UI, and the player has to physically run to each
 station and trigger it (wave a hand in front of it) in the same order. Each
 round the sequence gets one step longer.
 
+| Station hardware | Web UI |
+|---|---|
+| ![ESP8266 with HC-SR04 distance sensor](pictures/esp_with_dist_sensor.PNG) | ![Web UI showing the game board](pictures/web_app.png) |
+
 ## How it works
 
 1. **Stations**: Each station is an ESP8266 (NodeMCU) running an HC-SR04
